@@ -78,6 +78,14 @@ function tsApp() {
 	return ts(filesRoot, filesDest, tsProject);
 }
 
+function tsGulp() {
+	filesRoot = './';
+	filesDest = './';
+	var tsProject = plugins.typescript.createProject('tsconfig.json');
+
+	return ts(filesRoot, filesDest, tsProject);
+}
+
 function casper() {
 	return gulp.src('build/server.js', {read: false})
 		.pipe(plugins.shell([
@@ -91,19 +99,23 @@ function mongodb() {
 }
 
 function watch() {
-	var watch = gulp.watch('src/**/*.ts', tsSrc);
+	var watch = gulp.watch(['src/**/*.ts'], tsSrc);
 
 	watch.on('change', function (path:String) {
 		changed = path;
 	});
 }
 
+function watchGulp() {
+	var watch = gulp.watch('gulpfile.ts', tsGulp);
+}
+
 /**
- * Public Tasks
+ * Public Tasks!
  */
 
-gulp.task('build', gulp.series(
-	tsSrc, watch
+gulp.task('build', gulp.parallel(
+	tsSrc, watchGulp, watch
 ));
 gulp.task('build:server', gulp.series(tsServer));
 gulp.task('casper', gulp.series(casper));

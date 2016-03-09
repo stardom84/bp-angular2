@@ -3,6 +3,7 @@
 	"version": "1.0.0",
 	"description": "",
 	"scripts": {
+		"gulp": "tsc && gulp build",
 		"preinstall": "npm install -g typings",
 		"postinstall": "cd src && typings install"
 	},
