@@ -1,5 +1,10 @@
+import {Config as CONFIG} from './CONFIG';
+
 var gulp = require('gulp'),
-	plugins = require('gulp-load-plugins')();
+	plugins = require('gulp-load-plugins')(),
+	Paths = CONFIG.path,
+	Env = CONFIG.env,
+	watcher, server;
 
 var path = require('path'),
 	fork = require('child_process');
@@ -9,88 +14,82 @@ fork = fork.fork;
 var pathExists = require('path-exists');
 
 
-process.env.NODE_ENV = process.env.NODE_ENV ? process.env.NODE_ENV : 'development';
-process.env.PORT = process.env.PORT ? process.env.PORT : '8080';
-var env = {
-	NODE_ENV: process.env.NODE_ENV,
-	PORT: process.env.PORT,
-	get isDev() {
-		return this.NODE_ENV === 'development';
-	},
-	get isProd() {
-		return this.NODE_ENV === 'production';
-	},
-	get paths() {
-		return; //this.isDev ? paths.dev : paths.prod;
-	}
-};
-
-
 /**
  * Definitions
  */
 
-var files = [
-	'typings/main.d.ts',
-	'src/**/*.ts'
-], changed;
+var changed;
 
-function ts(filesRoot:String, filesDest:String, tsProject:any, base?:String) {
-	files = changed ? changed : files;
+var ts = {
+	compile: function compile(root:String, build:String, target:Array<string>, tsProject:any, base?:String) {
+		target = changed ? changed : target;
 
-	var result = gulp.src(['typings/main.d.ts'].concat(files), {base: path.join(filesRoot, base ? base : '')})
-		.pipe(plugins.debug({title: 'Stream contents:', minimal: true}))
-		.pipe(plugins.tslint())
-		.pipe(plugins.tslint.report('verbose'))
-		.pipe(plugins.sourcemaps.init())
-		.pipe(plugins.typescript(tsProject));
-	return result.js
-		.pipe(plugins.if(env.isProd, plugins.uglify()))
-		.pipe(plugins.if(env.isDev, plugins.sourcemaps.write({
-			sourceRoot: path.join(__dirname, '/', filesRoot)
-		})))
-		.pipe(gulp.dest(filesDest));
-}
+		var result = gulp.src(['typings/main.d.ts'].concat(target), {base: path.join(root, base ? base : '')})
+			.pipe(plugins.debug({title: 'Stream contents:', minimal: true}))
+			.pipe(plugins.tslint())
+			.pipe(plugins.tslint.report('verbose'))
+			.pipe(plugins.sourcemaps.init())
+			.pipe(plugins.typescript(tsProject));
+		return result.js
+			.pipe(plugins.if(Env.isProd, plugins.uglify()))
+			.pipe(plugins.if(Env.isDev, plugins.sourcemaps.write({
+				source: path.join(__dirname, '/', root)
+			})))
+			.pipe(gulp.dest(build));
+	},
+	server: function tsServer() {
+		var tsProject = plugins.typescript.createProject('tsconfig.json'),
+			target = [
+				'typings/main.d.ts',
+				'src/server/**/*.ts'
+			];
 
-var filesRoot = 'src';
-var filesDest = 'build';
+		return ts.compile(Paths.source, Paths.build, target, tsProject, 'server');
+	},
+	app: function tsApp() {
+		var tsProject = plugins.typescript.createProject('tsconfig.json'),
+			target = [
+				'typings/main.d.ts',
+				'src/app/**/*.ts'
+			];
+		return ts.compile(Paths.source, Paths.build, target, tsProject);
+	},
+	gulp: function tsGulp() {
+		var target = [
+			'typings/main.d.ts',
+			'gulpfile.ts'
+		];
 
-function tsSrc() {
+		var tsProject = plugins.typescript.createProject('tsconfig.json');
+		return ts.compile('./', './', target, tsProject);
+	},
 
+	start: function start() {
+		if (/gulpfile/gi.test(changed)) {
+			return ts.gulp();
+		} else if (/\/server/gi) {
+			return ts.server();
+		} else if (/\/app/gi) {
+			return ts.app();
+		}
+	}
+};
 
-	var tsProject = plugins.typescript.createProject('tsconfig.json');
+function index() {
+	var css = ['build/css/*'];
+	var libs = ['build/libs/*'];
 
-	return ts(filesRoot, filesDest, tsProject);
-}
+	if (Env.isDev) {
+		libs = Paths.dev.libs.js.map(lib => path.join('build/libs/', lib));
+	}
 
-function tsServer() {
+	var source = gulp.src(libs, {read: false});
 
-	var base = 'server';
-	var tsProject = plugins.typescript.createProject('tsconfig.json');
-
-	return ts(filesRoot, filesDest, tsProject, base);
-}
-
-function tsApp() {
-
-	var tsProject = plugins.typescript.createProject('tsconfig.json');
-
-	return ts(filesRoot, filesDest, tsProject);
-}
-
-function tsGulp() {
-	filesRoot = './';
-	filesDest = './';
-	var tsProject = plugins.typescript.createProject('tsconfig.json');
-
-	return ts(filesRoot, filesDest, tsProject);
-}
-
-function casper() {
-	return gulp.src('build/server.js', {read: false})
-		.pipe(plugins.shell([
-			'node <%= file.path %>'
-		]));
+	return gulp.src('src/app/index.html')
+		.pipe(plugins.inject(source, {ignorePath: 'build'}))
+		.pipe(plugins.preprocess({context: Env}))
+		.pipe(gulp.dest('build'));
+	//.pipe(plugins.connect.reload());
 }
 
 function mongodb() {
@@ -99,28 +98,39 @@ function mongodb() {
 }
 
 function watch() {
-	var watch = gulp.watch(['src/**/*.ts'], tsSrc);
+	watcher = gulp.watch(['src/**/*.ts', 'gulpfile.ts'], ts.start);
 
-	watch.on('change', function (path:String) {
+	watcher.on('change', (path:string) => {
 		changed = path;
 	});
 }
 
-function watchGulp() {
-	var watch = gulp.watch('gulpfile.ts', tsGulp);
+function serve() {
+	server = plugins.liveServer.new(path.join(Paths.build, Paths.serverFile));
+	server.start();
 }
 
 /**
- * Public Tasks!
+ * Public Tasks
  */
 
+/*build*/
+gulp.task('build:server', gulp.series(ts.server));
+gulp.task('build:app', gulp.series(ts.app));
+gulp.task('build:gulp', gulp.series(ts.gulp));
 gulp.task('build', gulp.parallel(
-	tsSrc, watchGulp, watch
+	'build:server', 'build:app', watch
 ));
-gulp.task('build:server', gulp.series(tsServer));
-gulp.task('casper', gulp.series(casper));
 
+/*mongodb*/
 gulp.task('mongodb', gulp.series(mongodb));
+
+/*index*/
+gulp.task('index', index);
+
+/*serve*/
+gulp.task('serve', gulp.series('build', serve));
+
 /**
  * Watches
  */

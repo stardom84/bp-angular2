@@ -7,9 +7,10 @@
 		"removeComments": false,
 		"noImplicitAny": false
 	},
-	"files": [
+	"filesGlob": [
 		"typings/main.d.ts",
-		"gulpfile.ts"
+		"gulpfile.ts",
+		"CONFIG.ts"
 	],
 	"exclude": [
 		"node_modules",
